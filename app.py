@@ -9,56 +9,72 @@ if "theme" not in st.session_state:
 
 with st.sidebar:
     st.header("Settings")
-    dark = st.toggle("Dark mode", value=(st.session_state.theme == "dark"))
-    st.session_state.theme = "dark" if dark else "light"
+    dark_mode = st.toggle("Dark mode", value=(st.session_state.theme == "dark"))
+    st.session_state.theme = "dark" if dark_mode else "light"
 
-inject_css(st.session_state.theme)
+THEME = st.session_state.theme
+inject_css(THEME)
 
 st.title("Industrial analytics portfolio")
-st.caption("Public dashboards focused on real-world data, and decision-oriented insights.")
+st.caption(
+    "Public dashboards focused on operational reality: messy data, clear assumptions, and decision-oriented framing."
+)
 
-st.markdown("""
+st.markdown(
+    """
 <div class="card">
   <div class="muted">
-    This portfolio is built to reflect real industrial analytics work: imperfect data, clear assumptions,
-    and outputs that a plant, operations, or decarbonisation team could actually use.
+    This portfolio is built to reflect real industrial analytics work — not demo visuals.
+    The emphasis is on <b>domain framing</b>, <b>data handling</b>, and <b>explainable outputs</b>
+    that could be used in steel, mining, or energy-transition conversations.
   </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 st.write("")
 
 c1, c2 = st.columns(2)
 
 with c1:
-    st.markdown("""
+    st.markdown(
+        """
 <div class="card">
   <h3>🌍 Steelmaking routes</h3>
   <div class="muted">
-    Global production by route (BF–BOF vs DRI–EAF) using Global Energy Monitor data.
-    Focus on route mix, interpretation, and transition signals.
+    Global route mix (BF–BOF vs DRI–EAF) using Global Energy Monitor data.
+    Focus: route structure, interpretation, and transition readiness signals.
   </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
     st.page_link("pages/1_Steel_Routes.py", label="Open: Steelmaking routes →")
 
 with c2:
-    st.markdown("""
+    st.markdown(
+        """
 <div class="card">
-  <h3>📈 Markets & energy transition</h3>
+  <h3>⚙️ Cost & pressure signals on steel systems</h3>
   <div class="muted">
-    Live market proxies (S&P 500, Nasdaq, Gold, China exposure) alongside oil production trend (EIA).
-    Focus on context, correlation regimes, and “what changed” framing.
+    Public proxies for system pressures: steel output signal, iron ore input signal,
+    oil (energy/logistics), and a China-linked demand context proxy.
+    Focus: framing conditions, not forecasting.
   </div>
 </div>
-""", unsafe_allow_html=True)
-    st.page_link("pages/2_Markets_&_Energy.py", label="Open: Markets & energy →")
+""",
+        unsafe_allow_html=True,
+    )
+    st.page_link("pages/2_Markets_&_Energy.py", label="Open: Cost & pressure signals →")
 
 st.write("")
-with st.expander("About the approach"):
-    st.markdown("""
-- Minimal hype; explicit assumptions and validation checks.
-- Prefer stable public sources and reproducible transformations.
-- Visuals aim for clarity (not maximal interactivity).
-""")
-
+with st.expander("What to expect (and what not to expect)"):
+    st.markdown(
+        """
+- These dashboards aim to be **useful and explainable**, not exhaustive.
+- I explicitly state assumptions and avoid overconfident conclusions.
+- Public sources are used where possible; transformations are reproducible.
+- The goal is to demonstrate *how I think* about industrial data and decisions.
+"""
+    )
