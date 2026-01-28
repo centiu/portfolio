@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-# Ensure repo root is on Python path so "common_ui.py" can be imported from pages/
+# --- ensure repo root on path ---
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -12,27 +12,32 @@ import plotly.express as px
 
 from common_ui import inject_css, style_plotly
 
-# Optional: fail gracefully if dependency missing (useful on Cloud)
+# yfinance dependency
 try:
     import yfinance as yf
 except ModuleNotFoundError:
     st.error("Missing dependency: yfinance. Add it to requirements.txt and redeploy.")
     st.stop()
 
-st.set_page_config(page_title="Markets & Energy", layout="wide")
+st.set_page_config(page_title="Steel system cost & pressure context", layout="wide")
 
 THEME = st.session_state.get("theme", "light")
 inject_css(THEME)
 
-st.title("📈 Markets & energy context")
-st.caption("Live market proxies (Yahoo Finance). Designed as context — not a trading system.")
+# ----------------------------
+# Page framing
+# ----------------------------
+
+st.title("⚙️ Cost & pressure signals on steel systems")
+st.caption("Physical inputs, outputs, and macro context using public market proxies.")
 
 st.markdown(
     """
 <div class="card">
   <div class="muted">
-    This page provides a lightweight context layer for industrial / decarbonisation discussions.
-    It compares relative performance of broad risk assets and hedges using ETF proxies.
+    This page provides a <b>context layer</b> for steel and mining discussions.
+    It focuses on <b>inputs, outputs, and system pressures</b> rather than market timing.
+    All series are proxies — the intent is framing, not forecasting.
   </div>
 </div>
 """,
@@ -42,43 +47,53 @@ st.markdown(
 # ----------------------------
 # Controls
 # ----------------------------
+
 with st.sidebar:
     st.subheader("Settings")
-    lookback = st.selectbox("Lookback", ["6mo", "1y", "2y", "5y"], index=1)
+    lookback = st.selectbox("Lookback window", ["6mo", "1y", "2y", "5y"], index=1)
     normalize = st.toggle("Normalize to 100", value=True)
-    show_returns = st.toggle("Show snapshot returns", value=True)
+    show_snapshot = st.toggle("Show snapshot comparison", value=True)
+
+# ----------------------------
+# Series definition (industrial logic)
+# ----------------------------
 
 SERIES = {
-    "S&P 500 (SPY)": "SPY",
-    "Nasdaq 100 (QQQ)": "QQQ",
-    "Gold (GLD)": "GLD",
-    "China exposure (FXI)": "FXI",
+    "Steel price (HRC proxy)": "SLX",          # Steel producers ETF (output signal proxy)
+    "Iron ore price (proxy)": "BHP",            # Mining-heavy proxy; imperfect but defensible
+    "Oil price (Brent proxy)": "BZ=F",           # Brent crude futures
+    "China-linked demand proxy": "FXI",          # Large-cap China equity exposure
 }
+
+SERIES_NOTES = {
+    "Steel price (HRC proxy)": "Equity proxy for steel price and margin conditions",
+    "Iron ore price (proxy)": "Mining-linked equity proxy (not a spot index)",
+    "Oil price (Brent proxy)": "Energy and logistics cost pressure",
+    "China-linked demand proxy": "Market sentiment toward China-related demand",
+}
+
+# ----------------------------
+# Data loading
+# ----------------------------
 
 @st.cache_data(ttl=3600)
 def load_prices(period: str) -> pd.DataFrame:
     tickers = list(SERIES.values())
-
     data = yf.download(
         tickers,
         period=period,
         auto_adjust=True,
         progress=False,
-        group_by="column",
-        threads=True
+        threads=True,
     )
 
-    # MultiIndex columns when multiple tickers
     if isinstance(data.columns, pd.MultiIndex):
         close = data["Close"].copy()
     else:
-        # single ticker case
         close = data[["Close"]].copy()
         close.columns = [tickers[0]]
 
     close = close.rename(columns={v: k for k, v in SERIES.items()})
-
-    # Keep rows where at least one series exists
     close = close.dropna(how="all")
 
     return close
@@ -86,135 +101,142 @@ def load_prices(period: str) -> pd.DataFrame:
 prices = load_prices(lookback)
 
 if prices.empty:
-    st.error("No price data returned (or all values missing). Try a different lookback or refresh.")
+    st.error("No data returned. Try another lookback window.")
     st.stop()
 
 # ----------------------------
 # Main chart
 # ----------------------------
+
 if normalize:
     norm = (prices / prices.iloc[0]) * 100.0
-    plot_df = norm.reset_index().melt("Date", var_name="Series", value_name="Index (Start=100)")
-    fig = px.line(plot_df, x="Date", y="Index (Start=100)", color="Series", title="Relative performance (normalized)")
-    fig = style_plotly(fig, THEME, title="Relative performance (normalized)", subtitle=f"Lookback: {lookback}")
+    plot_df = norm.reset_index().melt(
+        "Date", var_name="Series", value_name="Index (Start = 100)"
+    )
+    fig = px.line(
+        plot_df,
+        x="Date",
+        y="Index (Start = 100)",
+        color="Series",
+        title="Relative movement of cost & pressure signals",
+    )
+    fig = style_plotly(
+        fig,
+        THEME,
+        title="Relative movement of cost & pressure signals",
+        subtitle=f"Normalized comparison | Lookback: {lookback}",
+    )
 else:
-    plot_df = prices.reset_index().melt("Date", var_name="Series", value_name="Price")
-    fig = px.line(plot_df, x="Date", y="Price", color="Series", title="Price series")
-    fig = style_plotly(fig, THEME, title="Price series", subtitle=f"Lookback: {lookback}")
+    plot_df = prices.reset_index().melt(
+        "Date", var_name="Series", value_name="Price"
+    )
+    fig = px.line(
+        plot_df,
+        x="Date",
+        y="Price",
+        color="Series",
+        title="Price series (raw scale)",
+    )
+    fig = style_plotly(
+        fig,
+        THEME,
+        title="Price series (raw scale)",
+        subtitle=f"Unnormalized | Lookback: {lookback}",
+    )
 
-st.write("")
 st.markdown('<div class="card">', unsafe_allow_html=True)
 st.plotly_chart(fig, use_container_width=True)
-st.markdown("</div>", unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 # ----------------------------
-# Snapshot returns (robust)
+# Snapshot comparison (robust)
 # ----------------------------
-def compute_period_return(series: pd.Series) -> float | None:
-    """Return % change from first valid to last valid for one series."""
+
+def period_return(series: pd.Series) -> float | None:
     s = series.dropna()
     if s.empty:
         return None
-    first = s.iloc[0]
-    last = s.iloc[-1]
+    first, last = s.iloc[0], s.iloc[-1]
     if first == 0 or pd.isna(first) or pd.isna(last):
         return None
     return (last / first - 1.0) * 100.0
 
-if show_returns:
+if show_snapshot:
     st.write("")
-    st.subheader("Snapshot returns")
+    st.subheader("Snapshot comparison")
 
-    returns = []
+    rows = []
     for col in prices.columns:
-        r = compute_period_return(prices[col])
-        returns.append({"Series": col, f"Return over {lookback} (%)": r})
+        r = period_return(prices[col])
+        rows.append({
+            "Signal": col,
+            f"Change over {lookback} (%)": r,
+            "Interpretation": SERIES_NOTES.get(col, ""),
+        })
 
-    out = pd.DataFrame(returns)
+    snap = pd.DataFrame(rows).dropna(subset=[f"Change over {lookback} (%)"])
+    snap = snap.sort_values(f"Change over {lookback} (%)", ascending=False)
 
-    # Drop missing series (e.g., ticker failed)
-    out = out.dropna(subset=[f"Return over {lookback} (%)"])
+    fig_snap = px.bar(
+        snap,
+        x=f"Change over {lookback} (%)",
+        y="Signal",
+        orientation="h",
+        title="Relative change over selected window",
+    )
+    fig_snap.update_traces(marker_line_width=0, opacity=0.95)
+    fig_snap.update_traces(
+        hovertemplate="<b>%{y}</b><br>%{x:.1f}%<extra></extra>"
+    )
 
-    if out.empty:
-        st.warning("No valid returns could be computed (data missing for all series). Try refresh or another lookback.")
-    else:
-        out = out.sort_values(f"Return over {lookback} (%)", ascending=False)
+    fig_snap = style_plotly(
+        fig_snap,
+        THEME,
+        title="Relative change over selected window",
+        subtitle="Simple first-to-last comparison (not a forecast)",
+    )
 
-        fig_ret = px.bar(
-            out,
-            x=f"Return over {lookback} (%)",
-            y="Series",
-            orientation="h",
-            title="Period return by series",
-        )
-        fig_ret.update_traces(marker_line_width=0, opacity=0.95)
-        fig_ret.update_traces(hovertemplate="<b>%{y}</b><br>%{x:.1f}%<extra></extra>")
-        fig_ret = style_plotly(
-            fig_ret,
-            THEME,
-            title="Period return by series",
-            subtitle="Computed from first/last available value per series (handles missing tickers)",
-        )
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.plotly_chart(fig_snap, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.plotly_chart(fig_ret, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-with st.expander("Notes / assumptions"):
-    st.markdown("""
-- Uses ETF proxies: SPY (S&P 500), QQQ (Nasdaq 100), GLD (Gold), FXI (China large-cap exposure).
-- Normalised view answers: “what moved more” over the selected window.
-- Snapshot returns are computed per-series from the first/last valid observation (robust to partial missing data).
-- This is framing context for industrial / energy-transition discussions, not a trading recommendation.
-""")
+# ----------------------------
+# Explanation / interpretation layer
+# ----------------------------
 
 st.write("")
 st.divider()
 
-st.write("")
-st.divider()
-
-with st.expander("ℹ️ How to read this page"):
+with st.expander("ℹ️ How to interpret this page"):
     st.markdown("""
-### What does “China exposure” mean here?
-There is no single market index that perfectly represents “China’s role in global trade”.
-Instead, this page uses a **liquid equity proxy** (FXI) that tracks large, internationally exposed
-Chinese companies.
+### Why these signals?
+This page focuses on **pressures acting on steel systems**, not financial performance in isolation.
 
-This is best interpreted as:
-- A broad signal of market sentiment toward China-related risk  
-- A proxy for trade-sensitive and export-linked exposure  
-- *Not* a measure of Chinese industrial output or trade volumes  
+- **Steel price (output signal)** reflects demand strength and margin conditions.
+- **Iron ore price (input signal)** affects integrated BF–BOF cost structures.
+- **Oil price** influences mining, logistics, and energy-intensive operations.
+- **China-linked equity exposure** provides context on demand sentiment and trade sensitivity.
 
-It provides context, not precision.
-
----
-
-### What is a “snapshot return”?
-A **snapshot return** shows how much a series has moved over the selected period
-(from its first available value to its most recent one).
-
-It answers a simple question:
-> *“Over this window, what actually moved more?”*
-
-This is intentionally different from:
-- daily volatility
-- short-term trading signals
-- predictive indicators
-
-It’s a **retrospective framing tool**, useful for discussion and comparison.
+Together, these give a rough picture of whether conditions are becoming
+more or less favourable for steelmaking and mining operations.
 
 ---
 
-### Why normalize prices to 100?
-Markets operate on very different price scales.
-Normalizing all series to a common starting value (100) allows you to compare **relative movement**
-without being distracted by absolute price levels.
+### What does “normalized” mean here?
+Normalizing all series to a common starting value (100) removes price-scale differences
+and highlights **relative movement** instead of absolute prices.
 
-This helps highlight:
-- regime shifts
-- divergence or convergence between assets
-- changing correlations over time
+This helps answer:
+> “Which pressures are increasing faster, and which are easing?”
 
+---
 
+### What this analysis does *not* do
+- It does **not** forecast prices or demand  
+- It does **not** estimate margins or emissions  
+- It does **not** replace site-level cost models  
+
+It is intended as a **discussion aid** — a way to frame conversations about
+operating pressure, investment timing, and transition readiness.
 """)
+
