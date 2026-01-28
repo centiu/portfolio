@@ -9,9 +9,15 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-import yfinance as yf
 
 from common_ui import inject_css, style_plotly
+
+# Optional: fail gracefully if dependency missing (useful on Cloud)
+try:
+    import yfinance as yf
+except ModuleNotFoundError:
+    st.error("Missing dependency: yfinance. Add it to requirements.txt and redeploy.")
+    st.stop()
 
 st.set_page_config(page_title="Markets & Energy", layout="wide")
 
@@ -25,8 +31,8 @@ st.markdown(
     """
 <div class="card">
   <div class="muted">
-    This page provides a lightweight “context layer” for industrial / decarbonisation discussions.
-    It compares relative performance of broad risk assets and common hedges, using ETF proxies.
+    This page provides a lightweight context layer for industrial / decarbonisation discussions.
+    It compares relative performance of broad risk assets and hedges using ETF proxies.
   </div>
 </div>
 """,
@@ -52,22 +58,35 @@ SERIES = {
 @st.cache_data(ttl=3600)
 def load_prices(period: str) -> pd.DataFrame:
     tickers = list(SERIES.values())
-    data = yf.download(tickers, period=period, auto_adjust=True, progress=False)
 
-    # yfinance returns MultiIndex cols when multiple tickers
+    data = yf.download(
+        tickers,
+        period=period,
+        auto_adjust=True,
+        progress=False,
+        group_by="column",
+        threads=True
+    )
+
+    # MultiIndex columns when multiple tickers
     if isinstance(data.columns, pd.MultiIndex):
-        prices = data["Close"].copy()
+        close = data["Close"].copy()
     else:
-        prices = data[["Close"]].copy()
+        # single ticker case
+        close = data[["Close"]].copy()
+        close.columns = [tickers[0]]
 
-    prices = prices.rename(columns={v: k for k, v in SERIES.items()})
-    prices = prices.dropna(how="all")
-    return prices
+    close = close.rename(columns={v: k for k, v in SERIES.items()})
+
+    # Keep rows where at least one series exists
+    close = close.dropna(how="all")
+
+    return close
 
 prices = load_prices(lookback)
 
 if prices.empty:
-    st.error("No price data returned. Check connectivity or tickers.")
+    st.error("No price data returned (or all values missing). Try a different lookback or refresh.")
     st.stop()
 
 # ----------------------------
@@ -89,33 +108,62 @@ st.plotly_chart(fig, use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ----------------------------
-# Snapshot returns (credible, decision-ish)
+# Snapshot returns (robust)
 # ----------------------------
+def compute_period_return(series: pd.Series) -> float | None:
+    """Return % change from first valid to last valid for one series."""
+    s = series.dropna()
+    if s.empty:
+        return None
+    first = s.iloc[0]
+    last = s.iloc[-1]
+    if first == 0 or pd.isna(first) or pd.isna(last):
+        return None
+    return (last / first - 1.0) * 100.0
+
 if show_returns:
     st.write("")
     st.subheader("Snapshot returns")
 
-    last = prices.dropna().iloc[-1]
-    first = prices.dropna().iloc[0]
+    returns = []
+    for col in prices.columns:
+        r = compute_period_return(prices[col])
+        returns.append({"Series": col, f"Return over {lookback} (%)": r})
 
-    returns = ((last / first) - 1.0) * 100.0
-    out = returns.sort_values(ascending=False).to_frame(name=f"Return over {lookback} (%)")
-    out.index.name = "Series"
-    out = out.reset_index()
+    out = pd.DataFrame(returns)
 
-    # Display as a simple bar (not a table) for cleaner visual
-    fig_ret = px.bar(out, x=f"Return over {lookback} (%)", y="Series", orientation="h", title="Period return by series")
-    fig_ret.update_traces(marker_line_width=0, opacity=0.95)
-    fig_ret.update_traces(hovertemplate="<b>%{y}</b><br>%{x:.1f}%<extra></extra>")
-    fig_ret = style_plotly(fig_ret, THEME, title="Period return by series", subtitle="Simple snapshot of relative movement")
+    # Drop missing series (e.g., ticker failed)
+    out = out.dropna(subset=[f"Return over {lookback} (%)"])
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.plotly_chart(fig_ret, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    if out.empty:
+        st.warning("No valid returns could be computed (data missing for all series). Try refresh or another lookback.")
+    else:
+        out = out.sort_values(f"Return over {lookback} (%)", ascending=False)
+
+        fig_ret = px.bar(
+            out,
+            x=f"Return over {lookback} (%)",
+            y="Series",
+            orientation="h",
+            title="Period return by series",
+        )
+        fig_ret.update_traces(marker_line_width=0, opacity=0.95)
+        fig_ret.update_traces(hovertemplate="<b>%{y}</b><br>%{x:.1f}%<extra></extra>")
+        fig_ret = style_plotly(
+            fig_ret,
+            THEME,
+            title="Period return by series",
+            subtitle="Computed from first/last available value per series (handles missing tickers)",
+        )
+
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.plotly_chart(fig_ret, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 with st.expander("Notes / assumptions"):
     st.markdown("""
 - Uses ETF proxies: SPY (S&P 500), QQQ (Nasdaq 100), GLD (Gold), FXI (China large-cap exposure).
 - Normalised view answers: “what moved more” over the selected window.
+- Snapshot returns are computed per-series from the first/last valid observation (robust to partial missing data).
 - This is framing context for industrial / energy-transition discussions, not a trading recommendation.
 """)
