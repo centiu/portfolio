@@ -15,7 +15,7 @@ with st.sidebar:
 inject_css(st.session_state.theme)
 
 st.title("Industrial analytics portfolio")
-st.caption("Public dashboards focused on messy real-world data, validation, and decision-oriented insights.")
+st.caption("Public dashboards focused on real-world data, and decision-oriented insights.")
 
 st.markdown("""
 <div class="card">
@@ -61,3 +61,4 @@ with st.expander("About the approach"):
 - Prefer stable public sources and reproducible transformations.
 - Visuals aim for clarity (not maximal interactivity).
 """)
+
