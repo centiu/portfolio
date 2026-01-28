@@ -167,3 +167,63 @@ with st.expander("Notes / assumptions"):
 - Snapshot returns are computed per-series from the first/last valid observation (robust to partial missing data).
 - This is framing context for industrial / energy-transition discussions, not a trading recommendation.
 """)
+
+st.write("")
+st.divider()
+
+with st.expander("ℹ️ How to read this page"):
+    st.markdown("""
+### What does “China exposure” mean here?
+There is no single market index that perfectly represents “China’s role in global trade”.
+Instead, this page uses a **liquid equity proxy** (FXI) that tracks large, internationally exposed
+Chinese companies.
+
+This is best interpreted as:
+- A broad signal of market sentiment toward China-related risk  
+- A proxy for trade-sensitive and export-linked exposure  
+- *Not* a measure of Chinese industrial output or trade volumes  
+
+It provides context, not precision.
+
+---
+
+### What is a “snapshot return”?
+A **snapshot return** shows how much a series has moved over the selected period
+(from its first available value to its most recent one).
+
+It answers a simple question:
+> *“Over this window, what actually moved more?”*
+
+This is intentionally different from:
+- daily volatility
+- short-term trading signals
+- predictive indicators
+
+It’s a **retrospective framing tool**, useful for discussion and comparison.
+
+---
+
+### Why normalize prices to 100?
+Markets operate on very different price scales.
+Normalizing all series to a common starting value (100) allows you to compare **relative movement**
+without being distracted by absolute price levels.
+
+This helps highlight:
+- regime shifts
+- divergence or convergence between assets
+- changing correlations over time
+
+---
+
+### Why include this analysis in an industrial portfolio?
+This page is not about market timing.
+
+It exists to show:
+- How external financial signals can be framed calmly and transparently  
+- How to work with live, imperfect data sources  
+- How to provide **context** rather than overconfident conclusions  
+
+For industrial, mining, and energy-transition roles, understanding **context and uncertainty**
+is often more valuable than producing a single “answer”.
+""")
+
