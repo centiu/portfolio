@@ -213,17 +213,6 @@ This helps highlight:
 - divergence or convergence between assets
 - changing correlations over time
 
----
 
-### Why include this analysis in an industrial portfolio?
-This page is not about market timing.
 
-It exists to show:
-- How external financial signals can be framed calmly and transparently  
-- How to work with live, imperfect data sources  
-- How to provide **context** rather than overconfident conclusions  
-
-For industrial, mining, and energy-transition roles, understanding **context and uncertainty**
-is often more valuable than producing a single “answer”.
-""")
 
