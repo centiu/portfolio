@@ -171,6 +171,9 @@ with st.expander("Notes / assumptions"):
 st.write("")
 st.divider()
 
+st.write("")
+st.divider()
+
 with st.expander("ℹ️ How to read this page"):
     st.markdown("""
 ### What does “China exposure” mean here?
@@ -214,5 +217,4 @@ This helps highlight:
 - changing correlations over time
 
 
-
-
+""")
