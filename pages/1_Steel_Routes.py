@@ -277,3 +277,56 @@ with st.expander("🔍 Data quality notes"):
 
 with st.expander("📊 View cleaned data"):
     st.dataframe(df, use_container_width=True)
+
+st.write("")
+st.divider()
+
+with st.expander("ℹ️ Understanding this analysis"):
+    st.markdown("""
+### What is BF–BOF?
+**BF–BOF** (Blast Furnace → Basic Oxygen Furnace) is the traditional integrated steelmaking route.
+Iron ore is reduced in a blast furnace using coke (coal-derived), producing pig iron, which is then
+refined into steel in a basic oxygen furnace.
+
+This route is:
+- Highly energy- and carbon-intensive  
+- Capital-heavy and long-lived  
+- Dominant in countries with legacy integrated steel plants  
+
+---
+
+### What is DRI–EAF?
+**DRI–EAF** (Direct Reduced Iron → Electric Arc Furnace) produces iron without melting it in a blast furnace.
+Iron ore is reduced using a reducing gas (traditionally natural gas, potentially hydrogen),
+and then melted in an electric arc furnace.
+
+This route is often discussed in decarbonisation contexts because:
+- It can operate with lower emissions today (gas-based DRI)
+- It is a prerequisite for hydrogen-based steelmaking
+- It is more modular and flexible than BF–BOF
+
+---
+
+### What does “route mix” tell us?
+This dashboard focuses on **how steel is made**, not just how much.
+
+Two countries with similar total steel output can have very different:
+- Energy requirements  
+- Emissions profiles  
+- Transition pathways  
+
+Looking at the **share of BF–BOF vs DRI–EAF** helps highlight:
+- Structural lock-in versus flexibility  
+- Where transition pressure will be hardest  
+- Where incremental decarbonisation is already feasible  
+
+---
+
+### What this analysis does *not* claim
+- It does **not** forecast future steel production  
+- It does **not** estimate emissions directly  
+- It does **not** imply that DRI is “good” or BF–BOF is “bad”  
+
+It simply frames the **starting point** from which technical and policy decisions must be made.
+""")
+
