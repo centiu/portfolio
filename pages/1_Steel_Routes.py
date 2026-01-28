@@ -1,18 +1,42 @@
 import sys
 from pathlib import Path
+import streamlit as st
 
-# Ensure repo root is on Python path so "common_ui.py" can be imported from pages/
+# --- Robust import setup for multipage apps (Streamlit Cloud friendly) ---
 ROOT = Path(__file__).resolve().parents[1]
+COMMON_UI_PATH = ROOT / "common_ui.py"
+
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+if not COMMON_UI_PATH.exists():
+    st.error(
+        "Cannot find `common_ui.py` in the repo root.\n\n"
+        "Expected path:\n"
+        f"- {COMMON_UI_PATH}\n\n"
+        "Fix:\n"
+        "- Make sure `common_ui.py` sits next to `app.py` (repo root), not inside `/pages`.\n"
+        "- Commit/push it to GitHub so Streamlit Cloud deploys it."
+    )
+    st.stop()
+
+try:
+    from common_ui import inject_css, style_plotly, style_table
+except Exception as e:
+    st.error(
+        "Failed to import `common_ui` even though the file exists.\n\n"
+        "Likely causes:\n"
+        "- File name mismatch (case sensitive on Linux)\n"
+        "- There is a syntax/runtime error inside `common_ui.py`\n\n"
+        f"Details: {type(e).__name__}: {e}"
+    )
+    st.stop()
+
+# --- normal imports after shared UI is available ---
 import pandas as pd
-import streamlit as st
 import plotly.express as px
 import pathlib
 from io import StringIO
-
-from common_ui import inject_css, style_plotly, style_table
 
 st.set_page_config(page_title="Steelmaking routes", layout="wide")
 
