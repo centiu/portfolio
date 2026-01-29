@@ -119,7 +119,7 @@ default_events = pd.DataFrame(
         },
         {
             "Date": pd.to_datetime("2026-01-07").date(),
-            "Event": "Venezuela political disruption (placeholder — edit to your intended event)",
+            "Event": "Venezuela political disruption",
             "Category": "Geopolitics",
             "Why it matters": "Context signal (often more energy-related than direct steel driver).",
         },
