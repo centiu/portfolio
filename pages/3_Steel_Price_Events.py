@@ -24,6 +24,49 @@ st.set_page_config(page_title="Steel price vs events", layout="wide")
 THEME = st.session_state.get("theme", "light")
 inject_css(THEME)
 
+
+def add_event_legend(fig, theme: str):
+    """
+    Add dummy traces so event line types appear in the legend.
+    (Plotly shapes/vlines don't automatically create legend entries.)
+    """
+    # Pick subtle legend colors that work in both themes without forcing a palette
+    if theme == "dark":
+        manual_color = "rgba(220,220,220,0.70)"
+        fed_color = "rgba(220,220,220,0.35)"
+    else:
+        manual_color = "rgba(60,60,60,0.55)"
+        fed_color = "rgba(60,60,60,0.28)"
+
+    # Dummy trace for manual events
+    fig.add_trace(
+        dict(
+            type="scatter",
+            x=[None],
+            y=[None],
+            mode="lines",
+            line=dict(color=manual_color, dash="dot", width=2),
+            name="Manual events (policy / geopolitics)",
+            showlegend=True,
+            hoverinfo="skip",
+        )
+    )
+
+    # Dummy trace for Fed changes
+    fig.add_trace(
+        dict(
+            type="scatter",
+            x=[None],
+            y=[None],
+            mode="lines",
+            line=dict(color=fed_color, dash="dot", width=2),
+            name="Fed rate changes (target range upper)",
+            showlegend=True,
+            hoverinfo="skip",
+        )
+    )
+
+
 # ----------------------------
 # Framing
 # ----------------------------
@@ -114,10 +157,8 @@ def load_fed_target_range_changes(min_year: int) -> tuple[pd.DataFrame, str | No
     If fetch/parsing fails, returns empty df and a warning message.
     """
     urls = [
-        # Common FRED CSV endpoint
         "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU",
-        # Alternate direct download endpoint
-        "https://fred.stlouisfed.org/graph/fredgraph.csv?bgcolor=%23e1e9f0&chart_type=line&drp=0&fo=open%20sans&graph_bgcolor=%23ffffff&height=450&mode=fred&recession_bars=on&txtcolor=%23444444&ts=12&tts=12&width=1168&nt=0&thu=0&trc=0&show_legend=yes&show_axis_titles=yes&show_tooltip=yes&id=DFEDTARU&scale=left&cosd=2008-12-16&coed=9999-12-31&line_color=%234572a7&link_values=false&line_style=solid&mark_type=none&mw=3&lw=2&ost=-99999&oet=99999&mma=0&fml=a&fq=Daily&fam=avg&fgst=lin&fgsnd=2020-02-01&line_index=1&transformation=lin&vintage_date=2026-01-29&revision_date=2026-01-29&nd=2008-12-16",
+        "https://fred.stlouisfed.org/graph/fredgraph.csv?bgcolor=%23e1e9f0&chart_type=line&drp=0&fo=open%20sans&graph_bgcolor=%23ffffff&height=450&mode=fred&recession_bars=on&txtcolor=%23444444&ts=12&tts=12&width=1168&nt=0&thu=0&trc=0&show_legend=yes&show_axis_titles=yes&show_tooltip=yes&id=DFEDTARU&scale=left&cosd=2008-12-16&coed=9999-12-31&line_color=%234572a7&link_values=false&line_style=solid&mark_type=none&mw=3&lw=2&ost=-99999&oet=99999&mma=0&fml=a&fq=Daily&fam=avg&fgst=lin&fgsnd=2020-02-01&line_index=1&transformation=lin&nd=2008-12-16",
     ]
 
     last_error = None
@@ -126,18 +167,16 @@ def load_fed_target_range_changes(min_year: int) -> tuple[pd.DataFrame, str | No
     for url in urls:
         try:
             tmp = pd.read_csv(url)
-            # Expect either ["DATE", "DFEDTARU"] or ["observation_date", "DFEDTARU"]
             cols = [c.strip() for c in tmp.columns.astype(str)]
             tmp.columns = cols
 
-            if "DATE" in tmp.columns:
+            if "DATE" in tmp.columns and "DFEDTARU" in tmp.columns:
                 fred = tmp.rename(columns={"DATE": "Date", "DFEDTARU": "Upper"})
                 break
-            if "observation_date" in tmp.columns:
+            if "observation_date" in tmp.columns and "DFEDTARU" in tmp.columns:
                 fred = tmp.rename(columns={"observation_date": "Date", "DFEDTARU": "Upper"})
                 break
 
-            # If it doesn't have expected columns, it's likely an HTML/error response parsed as CSV
             last_error = f"Unexpected columns from FRED: {tmp.columns.tolist()}"
         except Exception as e:
             last_error = f"{type(e).__name__}: {e}"
@@ -170,7 +209,6 @@ def load_fed_target_range_changes(min_year: int) -> tuple[pd.DataFrame, str | No
     changes["Event"] = changes.apply(_fmt_change, axis=1)
     changes["Category"] = "Monetary policy (Fed)"
     changes["Why it matters"] = "Policy rates affect financing conditions, demand sensitivity, and risk appetite."
-
     return changes[["Date", "Event", "Category", "Why it matters"]], None
 
 
@@ -281,6 +319,9 @@ fig = style_plotly(fig, THEME, title=title, subtitle=subtitle)
 fig.update_yaxes(title=y_title)
 fig.update_xaxes(title="")
 
+# Add legend entries for event-line types (important)
+add_event_legend(fig, THEME)
+
 # Event markers (Plotly-safe: vline + separate annotations)
 min_d = plot_df["Date"].min()
 max_d = plot_df["Date"].max()
@@ -299,13 +340,17 @@ if not plot_events.empty:
             continue
 
         x_val = pd.to_datetime(d).to_pydatetime()
-        fig.add_vline(x=x_val, line_width=1, line_dash="dot", opacity=0.55)
+
+        # Make Fed lines visually lighter than manual events
+        opacity = 0.35 if is_fed else 0.60
+
+        fig.add_vline(x=x_val, line_width=1, line_dash="dot", opacity=opacity)
 
         label_on = (show_fed_labels if is_fed else show_manual_labels)
         if label_on:
             fig.add_annotation(
                 x=x_val,
-                y=1.02 if not is_fed else 1.06,  # small separation
+                y=1.02 if not is_fed else 1.06,
                 xref="x",
                 yref="paper",
                 text=r["Event"],
@@ -313,7 +358,7 @@ if not plot_events.empty:
                 align="left",
                 xanchor="left",
                 font=dict(size=11),
-                opacity=0.85,
+                opacity=0.85 if not is_fed else 0.70,
             )
 
 st.markdown('<div class="card">', unsafe_allow_html=True)
