@@ -1,4 +1,12 @@
+import sys
+from pathlib import Path
 import streamlit as st
+
+# Ensure repo root is on Python path so "common_ui.py" can be imported reliably
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from common_ui import inject_css
 
 st.set_page_config(page_title="Portfolio | Industrial Analytics", layout="wide")
@@ -35,6 +43,7 @@ st.markdown(
 
 st.write("")
 
+# First row (2 cards)
 c1, c2 = st.columns(2)
 
 with c1:
@@ -58,7 +67,7 @@ with c2:
 <div class="card">
   <h3>⚙️ Cost & pressure signals on steel systems</h3>
   <div class="muted">
-    Public proxies for system pressures: steel output signal, iron ore input signal,
+    Proxies for system pressure: steel output signal, iron ore input signal,
     oil (energy/logistics), and a China-linked demand context proxy.
     Focus: framing conditions, not forecasting.
   </div>
@@ -69,11 +78,29 @@ with c2:
     st.page_link("pages/2_Markets_&_Energy.py", label="Open: Cost & pressure signals →")
 
 st.write("")
+
+# Second row (single wide card)
+st.markdown(
+    """
+<div class="card">
+  <h3>🧭 Steel price vs major events</h3>
+  <div class="muted">
+    Steel price trend (proxy) with an editable timeline of policy and geopolitical events.
+    Focus: “what changed around this date?” framing — without claiming causality.
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+st.page_link("pages/3_Steel_Price_Events.py", label="Open: Steel price vs events →")
+
+st.write("")
+
 with st.expander("What to expect (and what not to expect)"):
     st.markdown(
         """
 - These dashboards aim to be **useful and explainable**, not exhaustive.
-- I explicitly state assumptions and avoid overconfident conclusions.
+- Assumptions are stated clearly; I avoid overconfident conclusions.
 - Public sources are used where possible; transformations are reproducible.
 - The goal is to demonstrate *how I think* about industrial data and decisions.
 """
