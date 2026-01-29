@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+# --- ensure repo root on path (so common_ui imports work) ---
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -11,6 +12,7 @@ import plotly.express as px
 
 from common_ui import inject_css, style_plotly
 
+# yfinance dependency
 try:
     import yfinance as yf
 except ModuleNotFoundError:
@@ -22,6 +24,9 @@ st.set_page_config(page_title="Steel price vs events", layout="wide")
 THEME = st.session_state.get("theme", "light")
 inject_css(THEME)
 
+# ----------------------------
+# Framing
+# ----------------------------
 st.title("🧭 Steel price trends vs major events")
 st.caption("Steel price proxy (via Yahoo Finance) with an editable event timeline overlay.")
 
@@ -38,26 +43,35 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ----------------------------
+# Controls
+# ----------------------------
 with st.sidebar:
     st.subheader("Settings")
-    steel_ticker = st.text_input("Steel price ticker (Yahoo Finance)", value="HRC=F")
+    steel_ticker = st.text_input(
+        "Steel price ticker (Yahoo Finance)",
+        value="HRC=F",
+        help="Default: HRC=F (CME HRC futures proxy on Yahoo Finance).",
+    )
     lookback = st.selectbox("Lookback", ["6mo", "1y", "2y", "5y", "10y", "max"], index=3)
     normalize = st.toggle("Normalize to 100", value=False)
     show_events = st.toggle("Show event markers", value=True)
     show_event_labels = st.toggle("Show event labels", value=True)
 
+# ----------------------------
+# Data loading
+# ----------------------------
 @st.cache_data(ttl=3600)
 def load_series(ticker: str, period: str) -> pd.DataFrame:
     df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
     if df is None or df.empty:
         return pd.DataFrame()
 
-    # Some tickers come back with odd columns; enforce a single numeric series
+    # enforce a single numeric series
     if "Close" in df.columns:
         out = df[["Close"]].copy()
         out.columns = ["Price"]
     else:
-        # fallback: pick the last column that looks numeric
         out = df.select_dtypes(include="number").copy()
         if out.empty:
             return pd.DataFrame()
@@ -82,7 +96,7 @@ if normalize:
     plot_series["Price"] = (plot_series["Price"] / plot_series["Price"].iloc[0]) * 100.0
 
 # ----------------------------
-# Default events (Date must be date-like for data_editor)
+# Default event set (Date must be date-like for data_editor)
 # ----------------------------
 default_events = pd.DataFrame(
     [
@@ -138,12 +152,11 @@ events_clean["Date"] = pd.to_datetime(events_clean["Date"], errors="coerce")
 events_clean = events_clean.dropna(subset=["Date"]).sort_values("Date")
 
 # ----------------------------
-# Plot (robust)
+# Plot (robust) + safe event markers
 # ----------------------------
 st.write("")
 st.subheader("Steel price trend")
 
-# Make index + columns explicit and Plotly-safe
 plot_series = plot_series.copy()
 plot_series.index = pd.to_datetime(plot_series.index, errors="coerce")
 plot_series = plot_series.dropna()
@@ -168,39 +181,38 @@ fig = style_plotly(fig, THEME, title=title, subtitle=subtitle)
 fig.update_yaxes(title=y_title)
 fig.update_xaxes(title="")
 
+# Event markers (Plotly-safe: vline + separate annotations)
 if show_events and not events_clean.empty:
     min_d = plot_df["Date"].min()
     max_d = plot_df["Date"].max()
 
     for _, r in events_clean.iterrows():
-    d = r["Date"]
-    if d < min_d or d > max_d:
-        continue
+        d = r["Date"]
+        if d < min_d or d > max_d:
+            continue
 
-    # Plotly can choke on pandas Timestamp with add_vline annotations
-    x_val = pd.to_datetime(d).to_pydatetime()
+        x_val = pd.to_datetime(d).to_pydatetime()
 
-    fig.add_vline(
-        x=x_val,
-        line_width=1,
-        line_dash="dot",
-        opacity=0.6,
-    )
-
-    if show_event_labels:
-        fig.add_annotation(
+        fig.add_vline(
             x=x_val,
-            y=1.02,
-            xref="x",
-            yref="paper",
-            text=r["Event"],
-            showarrow=False,
-            align="left",
-            xanchor="left",
-            font=dict(size=11),
-            opacity=0.85,
+            line_width=1,
+            line_dash="dot",
+            opacity=0.6,
         )
 
+        if show_event_labels:
+            fig.add_annotation(
+                x=x_val,
+                y=1.02,
+                xref="x",
+                yref="paper",
+                text=r["Event"],
+                showarrow=False,
+                align="left",
+                xanchor="left",
+                font=dict(size=11),
+                opacity=0.85,
+            )
 
 st.markdown('<div class="card">', unsafe_allow_html=True)
 st.plotly_chart(fig, use_container_width=True)
@@ -235,12 +247,15 @@ if not events_clean.empty:
             title=f"Window around event: {selected_event}",
             subtitle=f"{window_days} days before/after | Event date: {d0.date()}",
         )
-        fig_w.add_vline(x=d0, line_width=2, line_dash="solid", opacity=0.7)
+        fig_w.add_vline(x=pd.to_datetime(d0).to_pydatetime(), line_width=2, line_dash="solid", opacity=0.7)
 
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.plotly_chart(fig_w, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
+# ----------------------------
+# Interpretation / caveats
+# ----------------------------
 st.write("")
 st.divider()
 
