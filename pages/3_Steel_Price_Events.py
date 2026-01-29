@@ -65,7 +65,6 @@ with st.sidebar:
 
     show_fed_events = st.toggle("Overlay Fed rate changes", value=True)
     show_fed_labels = st.toggle("Label Fed changes (can clutter)", value=False)
-
     fed_min_year = st.slider("Fed overlay: start year", 2008, 2026, 2018)
 
 # ----------------------------
@@ -77,6 +76,7 @@ def load_series(ticker: str, period: str) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
 
+    # enforce a single numeric series
     if "Close" in df.columns:
         out = df[["Close"]].copy()
         out.columns = ["Price"]
@@ -104,34 +104,61 @@ if normalize:
     plot_series["Price"] = (plot_series["Price"] / plot_series["Price"].iloc[0]) * 100.0
 
 # ----------------------------
-# Fed rate-change overlay (authoritative series from FRED)
-# DFEDTARU = Federal Funds Target Range - Upper Limit (daily)
+# Fed rate-change overlay (robust)
+# DFEDTARU = Federal Funds Target Range - Upper Limit
 # ----------------------------
 @st.cache_data(ttl=3600)
-def load_fed_target_range_changes(min_year: int) -> pd.DataFrame:
+def load_fed_target_range_changes(min_year: int) -> tuple[pd.DataFrame, str | None]:
     """
-    Pull FRED DFEDTARU (upper limit of target range) and return rows where the value changes.
-    Uses FRED CSV download endpoint (no extra deps).
+    Return (events_df, warning_message).
+    If fetch/parsing fails, returns empty df and a warning message.
     """
-    # This endpoint returns a CSV with columns: DATE, DFEDTARU
-    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU"
-    fred = pd.read_csv(url)
+    urls = [
+        # Common FRED CSV endpoint
+        "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU",
+        # Alternate direct download endpoint
+        "https://fred.stlouisfed.org/graph/fredgraph.csv?bgcolor=%23e1e9f0&chart_type=line&drp=0&fo=open%20sans&graph_bgcolor=%23ffffff&height=450&mode=fred&recession_bars=on&txtcolor=%23444444&ts=12&tts=12&width=1168&nt=0&thu=0&trc=0&show_legend=yes&show_axis_titles=yes&show_tooltip=yes&id=DFEDTARU&scale=left&cosd=2008-12-16&coed=9999-12-31&line_color=%234572a7&link_values=false&line_style=solid&mark_type=none&mw=3&lw=2&ost=-99999&oet=99999&mma=0&fml=a&fq=Daily&fam=avg&fgst=lin&fgsnd=2020-02-01&line_index=1&transformation=lin&vintage_date=2026-01-29&revision_date=2026-01-29&nd=2008-12-16",
+    ]
 
-    fred["DATE"] = pd.to_datetime(fred["DATE"], errors="coerce")
-    fred = fred.dropna(subset=["DATE"])
-    fred = fred.rename(columns={"DATE": "Date", "DFEDTARU": "Upper"})
+    last_error = None
+    fred = None
+
+    for url in urls:
+        try:
+            tmp = pd.read_csv(url)
+            # Expect either ["DATE", "DFEDTARU"] or ["observation_date", "DFEDTARU"]
+            cols = [c.strip() for c in tmp.columns.astype(str)]
+            tmp.columns = cols
+
+            if "DATE" in tmp.columns:
+                fred = tmp.rename(columns={"DATE": "Date", "DFEDTARU": "Upper"})
+                break
+            if "observation_date" in tmp.columns:
+                fred = tmp.rename(columns={"observation_date": "Date", "DFEDTARU": "Upper"})
+                break
+
+            # If it doesn't have expected columns, it's likely an HTML/error response parsed as CSV
+            last_error = f"Unexpected columns from FRED: {tmp.columns.tolist()}"
+        except Exception as e:
+            last_error = f"{type(e).__name__}: {e}"
+            continue
+
+    if fred is None:
+        empty = pd.DataFrame(columns=["Date", "Event", "Category", "Why it matters"])
+        return empty, f"Fed overlay unavailable (FRED fetch/parse failed). {last_error or ''}".strip()
+
+    fred["Date"] = pd.to_datetime(fred["Date"], errors="coerce")
     fred["Upper"] = pd.to_numeric(fred["Upper"], errors="coerce")
-    fred = fred.dropna(subset=["Upper"]).sort_values("Date")
-
+    fred = fred.dropna(subset=["Date", "Upper"]).sort_values("Date")
     fred = fred[fred["Date"].dt.year >= min_year].copy()
-    if fred.empty:
-        return pd.DataFrame(columns=["Date", "Event", "Category", "Why it matters"])
 
-    # Detect changes
+    if fred.empty:
+        empty = pd.DataFrame(columns=["Date", "Event", "Category", "Why it matters"])
+        return empty, None
+
     fred["Prev"] = fred["Upper"].shift(1)
     changes = fred[fred["Upper"] != fred["Prev"]].copy()
 
-    # Format events
     def _fmt_change(row):
         prev = row["Prev"]
         cur = row["Upper"]
@@ -142,17 +169,17 @@ def load_fed_target_range_changes(min_year: int) -> pd.DataFrame:
 
     changes["Event"] = changes.apply(_fmt_change, axis=1)
     changes["Category"] = "Monetary policy (Fed)"
-    changes["Why it matters"] = "Policy rate changes affect financing conditions, demand, and risk appetite."
+    changes["Why it matters"] = "Policy rates affect financing conditions, demand sensitivity, and risk appetite."
 
-    return changes[["Date", "Event", "Category", "Why it matters"]]
+    return changes[["Date", "Event", "Category", "Why it matters"]], None
 
-fed_events = load_fed_target_range_changes(fed_min_year) if show_fed_events else pd.DataFrame(
-    columns=["Date", "Event", "Category", "Why it matters"]
-)
+
+fed_events, fed_warning = (pd.DataFrame(columns=["Date", "Event", "Category", "Why it matters"]), None)
+if show_fed_events:
+    fed_events, fed_warning = load_fed_target_range_changes(fed_min_year)
 
 # ----------------------------
 # Default manual events (editable)
-# Keep these as “headline anchors”; user can edit dates/text.
 # ----------------------------
 default_events = pd.DataFrame(
     [
@@ -166,7 +193,7 @@ default_events = pd.DataFrame(
             "Date": pd.to_datetime("2020-03-11").date(),
             "Event": "COVID-19 declared a pandemic (WHO)",
             "Category": "Demand / Macro",
-            "Why it matters": "Demand shock + supply disruption; major regime shift for industry and logistics.",
+            "Why it matters": "Demand shock + supply disruption; a major regime shift for industry and logistics.",
         },
         {
             "Date": pd.to_datetime("2021-03-11").date(),
@@ -178,7 +205,7 @@ default_events = pd.DataFrame(
             "Date": pd.to_datetime("2022-02-24").date(),
             "Event": "Russia invades Ukraine",
             "Category": "Geopolitics",
-            "Why it matters": "Energy and commodity shock; changes freight, power, and risk premia.",
+            "Why it matters": "Energy and commodity shock; impacts freight, power, and risk premia.",
         },
         {
             "Date": pd.to_datetime("2024-04-13").date(),
@@ -207,14 +234,7 @@ events = st.data_editor(
         "Event": st.column_config.TextColumn("Event", width="large"),
         "Category": st.column_config.SelectboxColumn(
             "Category",
-            options=[
-                "Policy / Tariffs",
-                "China / Policy",
-                "Geopolitics",
-                "Demand / Macro",
-                "Supply / Energy",
-                "Other",
-            ],
+            options=["Policy / Tariffs", "China / Policy", "Geopolitics", "Demand / Macro", "Supply / Energy", "Other"],
             width="medium",
         ),
         "Why it matters": st.column_config.TextColumn("Why it matters", width="large"),
@@ -271,8 +291,8 @@ if not plot_events.empty:
         if d < min_d or d > max_d:
             continue
 
-        # Respect toggles
         is_fed = (r.get("Category", "") == "Monetary policy (Fed)")
+
         if is_fed and not show_fed_events:
             continue
         if (not is_fed) and not show_manual_events:
@@ -285,7 +305,7 @@ if not plot_events.empty:
         if label_on:
             fig.add_annotation(
                 x=x_val,
-                y=1.02 if not is_fed else 1.06,   # small separation to reduce collisions
+                y=1.02 if not is_fed else 1.06,  # small separation
                 xref="x",
                 yref="paper",
                 text=r["Event"],
@@ -299,6 +319,9 @@ if not plot_events.empty:
 st.markdown('<div class="card">', unsafe_allow_html=True)
 st.plotly_chart(fig, use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
+
+if fed_warning:
+    st.info(fed_warning)
 
 # ----------------------------
 # Quick before/after window
@@ -349,8 +372,7 @@ trade policy, energy risk, supply chains, or demand sentiment.
 
 ### Why add Fed rate changes?
 Fed policy shifts financing conditions and demand sensitivity across the economy.
-It often changes the “background regime” that industrial demand sits inside. The overlay is derived from the Fed target
-range series published on FRED (upper limit). :contentReference[oaicite:1]{index=1}
+It often changes the “background regime” that industrial demand sits inside.
 
 ### What it is *not* doing
 This does **not** prove causality. Steel prices reflect overlapping drivers:
