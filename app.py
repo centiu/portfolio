@@ -102,6 +102,6 @@ with st.expander("What to expect (and what not to expect)"):
 - These dashboards aim to be **useful and explainable**, not exhaustive.
 - Assumptions are stated clearly; I avoid overconfident conclusions.
 - Public sources are used where possible; transformations are reproducible.
-- The goal is to demonstrate *how I think* about industrial data and decisions.
 """
     )
+
