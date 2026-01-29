@@ -28,15 +28,15 @@ inject_css(THEME)
 # Framing
 # ----------------------------
 st.title("🧭 Steel price trends vs major events")
-st.caption("Steel price proxy (via Yahoo Finance) with an editable event timeline overlay.")
+st.caption("Steel price proxy (via Yahoo Finance) with an editable event timeline + optional Fed rate-change overlay.")
 
 st.markdown(
     """
 <div class="card">
   <div class="muted">
-    This page overlays <b>macro / policy / geopolitical events</b> onto a steel price trend.
-    It is not designed to “prove” causality — the goal is to support calm, defensible discussion about
-    timing, regime shifts, and volatility changes.
+    This page aligns <b>context events</b> with a steel price trend.
+    It is not designed to “prove” causality — the intent is to support calm discussion about
+    regime shifts, volatility changes, and timing.
   </div>
 </div>
 """,
@@ -44,22 +44,32 @@ st.markdown(
 )
 
 # ----------------------------
-# Controls
+# Sidebar controls
 # ----------------------------
 with st.sidebar:
     st.subheader("Settings")
+
     steel_ticker = st.text_input(
         "Steel price ticker (Yahoo Finance)",
         value="HRC=F",
         help="Default: HRC=F (CME HRC futures proxy on Yahoo Finance).",
     )
+
     lookback = st.selectbox("Lookback", ["6mo", "1y", "2y", "5y", "10y", "max"], index=3)
     normalize = st.toggle("Normalize to 100", value=False)
-    show_events = st.toggle("Show event markers", value=True)
-    show_event_labels = st.toggle("Show event labels", value=True)
+
+    st.divider()
+    st.caption("Event overlays")
+    show_manual_events = st.toggle("Show manual event markers", value=True)
+    show_manual_labels = st.toggle("Label manual events", value=True)
+
+    show_fed_events = st.toggle("Overlay Fed rate changes", value=True)
+    show_fed_labels = st.toggle("Label Fed changes (can clutter)", value=False)
+
+    fed_min_year = st.slider("Fed overlay: start year", 2008, 2026, 2018)
 
 # ----------------------------
-# Data loading
+# Price series loading
 # ----------------------------
 @st.cache_data(ttl=3600)
 def load_series(ticker: str, period: str) -> pd.DataFrame:
@@ -67,7 +77,6 @@ def load_series(ticker: str, period: str) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
 
-    # enforce a single numeric series
     if "Close" in df.columns:
         out = df[["Close"]].copy()
         out.columns = ["Price"]
@@ -82,7 +91,6 @@ def load_series(ticker: str, period: str) -> pd.DataFrame:
     out.index = pd.to_datetime(out.index, errors="coerce")
     out = out.dropna()
     out.index.name = "Date"
-
     return out
 
 series = load_series(steel_ticker, lookback)
@@ -96,7 +104,55 @@ if normalize:
     plot_series["Price"] = (plot_series["Price"] / plot_series["Price"].iloc[0]) * 100.0
 
 # ----------------------------
-# Default event set (Date must be date-like for data_editor)
+# Fed rate-change overlay (authoritative series from FRED)
+# DFEDTARU = Federal Funds Target Range - Upper Limit (daily)
+# ----------------------------
+@st.cache_data(ttl=3600)
+def load_fed_target_range_changes(min_year: int) -> pd.DataFrame:
+    """
+    Pull FRED DFEDTARU (upper limit of target range) and return rows where the value changes.
+    Uses FRED CSV download endpoint (no extra deps).
+    """
+    # This endpoint returns a CSV with columns: DATE, DFEDTARU
+    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU"
+    fred = pd.read_csv(url)
+
+    fred["DATE"] = pd.to_datetime(fred["DATE"], errors="coerce")
+    fred = fred.dropna(subset=["DATE"])
+    fred = fred.rename(columns={"DATE": "Date", "DFEDTARU": "Upper"})
+    fred["Upper"] = pd.to_numeric(fred["Upper"], errors="coerce")
+    fred = fred.dropna(subset=["Upper"]).sort_values("Date")
+
+    fred = fred[fred["Date"].dt.year >= min_year].copy()
+    if fred.empty:
+        return pd.DataFrame(columns=["Date", "Event", "Category", "Why it matters"])
+
+    # Detect changes
+    fred["Prev"] = fred["Upper"].shift(1)
+    changes = fred[fred["Upper"] != fred["Prev"]].copy()
+
+    # Format events
+    def _fmt_change(row):
+        prev = row["Prev"]
+        cur = row["Upper"]
+        if pd.isna(prev):
+            return f"Fed target range upper limit set to {cur:.2f}%"
+        direction = "↑" if cur > prev else "↓"
+        return f"Fed target range upper limit {direction} to {cur:.2f}%"
+
+    changes["Event"] = changes.apply(_fmt_change, axis=1)
+    changes["Category"] = "Monetary policy (Fed)"
+    changes["Why it matters"] = "Policy rate changes affect financing conditions, demand, and risk appetite."
+
+    return changes[["Date", "Event", "Category", "Why it matters"]]
+
+fed_events = load_fed_target_range_changes(fed_min_year) if show_fed_events else pd.DataFrame(
+    columns=["Date", "Event", "Category", "Why it matters"]
+)
+
+# ----------------------------
+# Default manual events (editable)
+# Keep these as “headline anchors”; user can edit dates/text.
 # ----------------------------
 default_events = pd.DataFrame(
     [
@@ -104,13 +160,25 @@ default_events = pd.DataFrame(
             "Date": pd.to_datetime("2018-03-08").date(),
             "Event": "US Section 232 steel tariffs announced (Trump)",
             "Category": "Policy / Tariffs",
-            "Why it matters": "Trade policy shock; changes import economics and expectations.",
+            "Why it matters": "Trade policy shock; can change import economics and expectations.",
+        },
+        {
+            "Date": pd.to_datetime("2020-03-11").date(),
+            "Event": "COVID-19 declared a pandemic (WHO)",
+            "Category": "Demand / Macro",
+            "Why it matters": "Demand shock + supply disruption; major regime shift for industry and logistics.",
         },
         {
             "Date": pd.to_datetime("2021-03-11").date(),
             "Event": "China 14th Five-Year Plan endorsed (2021–2025)",
             "Category": "China / Policy",
-            "Why it matters": "Signals priorities around industry, energy, and long-run structure.",
+            "Why it matters": "Signals priorities around industry, energy, and longer-run structure.",
+        },
+        {
+            "Date": pd.to_datetime("2022-02-24").date(),
+            "Event": "Russia invades Ukraine",
+            "Category": "Geopolitics",
+            "Why it matters": "Energy and commodity shock; changes freight, power, and risk premia.",
         },
         {
             "Date": pd.to_datetime("2024-04-13").date(),
@@ -125,7 +193,7 @@ if "steel_events" not in st.session_state:
     st.session_state.steel_events = default_events
 
 st.write("")
-st.subheader("Event timeline (editable)")
+st.subheader("Manual event timeline (editable)")
 
 events_df = st.session_state.steel_events.copy()
 events_df["Date"] = pd.to_datetime(events_df["Date"], errors="coerce").dt.date
@@ -139,7 +207,14 @@ events = st.data_editor(
         "Event": st.column_config.TextColumn("Event", width="large"),
         "Category": st.column_config.SelectboxColumn(
             "Category",
-            options=["Policy / Tariffs", "China / Policy", "Geopolitics", "Demand / Macro", "Supply / Energy", "Other"],
+            options=[
+                "Policy / Tariffs",
+                "China / Policy",
+                "Geopolitics",
+                "Demand / Macro",
+                "Supply / Energy",
+                "Other",
+            ],
             width="medium",
         ),
         "Why it matters": st.column_config.TextColumn("Why it matters", width="large"),
@@ -147,12 +222,17 @@ events = st.data_editor(
 )
 st.session_state.steel_events = events
 
-events_clean = events.copy()
-events_clean["Date"] = pd.to_datetime(events_clean["Date"], errors="coerce")
-events_clean = events_clean.dropna(subset=["Date"]).sort_values("Date")
+manual_events = events.copy()
+manual_events["Date"] = pd.to_datetime(manual_events["Date"], errors="coerce")
+manual_events = manual_events.dropna(subset=["Date"]).sort_values("Date")
+
+# Combine for plotting (manual + fed)
+plot_events = pd.concat([manual_events, fed_events], ignore_index=True)
+plot_events["Date"] = pd.to_datetime(plot_events["Date"], errors="coerce")
+plot_events = plot_events.dropna(subset=["Date"]).sort_values("Date")
 
 # ----------------------------
-# Plot (robust) + safe event markers
+# Plot
 # ----------------------------
 st.write("")
 st.subheader("Steel price trend")
@@ -173,7 +253,7 @@ if plot_df.empty:
 
 y_title = "Index (Start=100)" if normalize else "Price"
 title = f"Steel price proxy: {steel_ticker}"
-subtitle = f"Lookback: {lookback} | Markers: {'on' if show_events else 'off'}"
+subtitle = f"Lookback: {lookback} | Manual events: {'on' if show_manual_events else 'off'} | Fed overlay: {'on' if show_fed_events else 'off'}"
 
 fig = px.line(plot_df, x="Date", y="Price", title=title)
 fig.update_traces(hovertemplate="%{x|%Y-%m-%d}<br><b>%{y:.2f}</b><extra></extra>")
@@ -182,28 +262,30 @@ fig.update_yaxes(title=y_title)
 fig.update_xaxes(title="")
 
 # Event markers (Plotly-safe: vline + separate annotations)
-if show_events and not events_clean.empty:
-    min_d = plot_df["Date"].min()
-    max_d = plot_df["Date"].max()
+min_d = plot_df["Date"].min()
+max_d = plot_df["Date"].max()
 
-    for _, r in events_clean.iterrows():
+if not plot_events.empty:
+    for _, r in plot_events.iterrows():
         d = r["Date"]
         if d < min_d or d > max_d:
             continue
 
+        # Respect toggles
+        is_fed = (r.get("Category", "") == "Monetary policy (Fed)")
+        if is_fed and not show_fed_events:
+            continue
+        if (not is_fed) and not show_manual_events:
+            continue
+
         x_val = pd.to_datetime(d).to_pydatetime()
+        fig.add_vline(x=x_val, line_width=1, line_dash="dot", opacity=0.55)
 
-        fig.add_vline(
-            x=x_val,
-            line_width=1,
-            line_dash="dot",
-            opacity=0.6,
-        )
-
-        if show_event_labels:
+        label_on = (show_fed_labels if is_fed else show_manual_labels)
+        if label_on:
             fig.add_annotation(
                 x=x_val,
-                y=1.02,
+                y=1.02 if not is_fed else 1.06,   # small separation to reduce collisions
                 xref="x",
                 yref="paper",
                 text=r["Event"],
@@ -219,17 +301,17 @@ st.plotly_chart(fig, use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ----------------------------
-# Before/after window
+# Quick before/after window
 # ----------------------------
 st.write("")
 st.subheader("Quick before/after check (optional)")
 
-if not events_clean.empty:
-    event_options = events_clean["Event"].tolist()
-    selected_event = st.selectbox("Pick an event to inspect", event_options, index=0)
+if not manual_events.empty:
+    event_options = manual_events["Event"].tolist()
+    selected_event = st.selectbox("Pick a manual event to inspect", event_options, index=0)
     window_days = st.slider("Window (days before/after)", 7, 180, 60)
 
-    d0 = events_clean.loc[events_clean["Event"] == selected_event, "Date"].iloc[0]
+    d0 = manual_events.loc[manual_events["Event"] == selected_event, "Date"].iloc[0]
     start = d0 - pd.Timedelta(days=window_days)
     end = d0 + pd.Timedelta(days=window_days)
 
@@ -262,14 +344,17 @@ st.divider()
 with st.expander("ℹ️ How to interpret this page"):
     st.markdown("""
 ### What this page is doing
-This is a **time alignment tool**: it helps you inspect whether steel prices change *around* events that may matter
-for trade policy, energy risk, supply chains, or demand sentiment.
+This is a **time alignment tool**: it helps you inspect whether steel prices change *around* events that may matter for
+trade policy, energy risk, supply chains, or demand sentiment.
+
+### Why add Fed rate changes?
+Fed policy shifts financing conditions and demand sensitivity across the economy.
+It often changes the “background regime” that industrial demand sits inside. The overlay is derived from the Fed target
+range series published on FRED (upper limit). :contentReference[oaicite:1]{index=1}
 
 ### What it is *not* doing
-This does **not** prove causality. Steel prices reflect many overlapping drivers (demand cycles, capacity, inventories,
-freight, policy, and energy).
+This does **not** prove causality. Steel prices reflect overlapping drivers:
+demand cycles, capacity, inventories, freight, policy, and energy.
 
-### Why it’s meaningful
-Industrial roles often require combining imperfect proxies and real-world context, while being explicit about limits.
-That is the skill this page demonstrates.
+The intent is disciplined discussion, not “proof”.
 """)
