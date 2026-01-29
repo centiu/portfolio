@@ -37,7 +37,7 @@ st.markdown(
     This page overlays <b>notable macro / policy / geopolitical events</b> on a steel price time series.
     It is not meant to “prove” causality. The goal is to support calm, defensible discussion:
     <ul>
-      <li>What regime was the market in before/after an event?</li>
+      <li>What was the trend before/after an event?</li>
       <li>Did volatility increase? Did the trend break?</li>
       <li>Which events align with structural changes vs short-lived noise?</li>
     </ul>
@@ -55,8 +55,8 @@ with st.sidebar:
 
     steel_ticker = st.text_input(
         "Steel price ticker (Yahoo Finance)",
-        value="HRC=F",  # U.S. Midwest Domestic Hot-Rolled Coil Steel futures (proxy)
-        help="Default is HRC=F (CME HRC futures proxy on Yahoo Finance).",
+        value="HRC=F",
+        help="Default: HRC=F (CME HRC futures proxy on Yahoo Finance).",
     )
 
     lookback = st.selectbox("Lookback", ["6mo", "1y", "2y", "5y", "10y", "max"], index=3)
@@ -72,7 +72,6 @@ def load_series(ticker: str, period: str) -> pd.DataFrame:
     df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
     if df is None or df.empty:
         return pd.DataFrame()
-    # Keep a simple 2-col frame
     out = df[["Close"]].copy()
     out = out.rename(columns={"Close": "Price"})
     out = out.dropna()
@@ -85,46 +84,44 @@ if series.empty:
     st.error("No data returned for this ticker / lookback. Try a different lookback or ticker.")
     st.stop()
 
-# Optional normalization (useful for long history)
 plot_series = series.copy()
 if normalize:
     plot_series["Price"] = (plot_series["Price"] / plot_series["Price"].iloc[0]) * 100.0
 
 # ----------------------------
-# Default event set (editable)
+# Default event set (IMPORTANT: Date is real date type)
 # ----------------------------
-# NOTE: These are "anchor" events. You can refine wording/dates in the editor below.
 default_events = pd.DataFrame(
     [
         {
-            "Date": "2018-03-08",
+            "Date": pd.to_datetime("2018-03-08").date(),
             "Event": "US Section 232 steel tariffs announced (Trump)",
             "Category": "Policy / Tariffs",
             "Why it matters": "Trade policy shock; changes import economics and market expectations.",
         },
         {
-            "Date": "2021-03-11",
+            "Date": pd.to_datetime("2021-03-11").date(),
             "Event": "China 14th Five-Year Plan endorsed (2021–2025)",
             "Category": "China / Policy",
             "Why it matters": "Signals priorities around industry, energy, and long-run growth structure.",
         },
         {
-            "Date": "2024-04-13",
+            "Date": pd.to_datetime("2024-04-13").date(),
             "Event": "Iran launches direct attack on Israel (missiles/drones)",
             "Category": "Geopolitics",
             "Why it matters": "Risk premium + energy/logistics uncertainty; global inflation sensitivity.",
         },
         {
-            "Date": "2025-06-13",
-            "Event": "Israel strikes Iran; escalation risk (broader conflict concerns)",
+            "Date": pd.to_datetime("2025-06-13").date(),
+            "Event": "Israel strikes Iran; escalation risk concerns",
             "Category": "Geopolitics",
-            "Why it matters": "Supply risk + energy shock risk; sentiment and freight impacts.",
+            "Why it matters": "Energy shock risk; sentiment and freight impacts.",
         },
         {
-            "Date": "2026-01-07",
-            "Event": "Venezuela: Maduro ousted / detained (reported early Jan 2026)",
+            "Date": pd.to_datetime("2026-01-07").date(),
+            "Event": "Venezuela political disruption (placeholder — edit to your intended event)",
             "Category": "Geopolitics",
-            "Why it matters": "Oil/political risk narrative shift (mostly context, not direct steel driver).",
+            "Why it matters": "Context signal (often more energy-related than direct steel driver).",
         },
     ]
 )
@@ -136,25 +133,32 @@ if "steel_events" not in st.session_state:
 st.write("")
 st.subheader("Event timeline (editable)")
 
+# Ensure schema stays consistent: Date column must be date-like for DateColumn
+events_df = st.session_state.steel_events.copy()
+if "Date" in events_df.columns:
+    # Convert anything in Date column to python date (safe for data_editor)
+    events_df["Date"] = pd.to_datetime(events_df["Date"], errors="coerce").dt.date
+
 events = st.data_editor(
-    st.session_state.steel_events,
+    events_df,
     use_container_width=True,
     num_rows="dynamic",
     column_config={
-        "Date": st.column_config.DateColumn(format="YYYY-MM-DD"),
-        "Event": st.column_config.TextColumn(width="large"),
+        "Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+        "Event": st.column_config.TextColumn("Event", width="large"),
         "Category": st.column_config.SelectboxColumn(
+            "Category",
             options=["Policy / Tariffs", "China / Policy", "Geopolitics", "Demand / Macro", "Supply / Energy", "Other"],
             width="medium",
         ),
-        "Why it matters": st.column_config.TextColumn(width="large"),
+        "Why it matters": st.column_config.TextColumn("Why it matters", width="large"),
     },
 )
 
 # Save edited version back
 st.session_state.steel_events = events
 
-# Clean event dates
+# Clean event dates for plotting
 events_clean = events.copy()
 events_clean["Date"] = pd.to_datetime(events_clean["Date"], errors="coerce")
 events_clean = events_clean.dropna(subset=["Date"]).sort_values("Date")
@@ -177,9 +181,7 @@ fig = style_plotly(fig, THEME, title=title, subtitle=subtitle)
 fig.update_yaxes(title=y_title)
 fig.update_xaxes(title="")
 
-# Add event lines + annotations
 if show_events and not events_clean.empty:
-    # Only draw events within plot range
     min_d = plot_df["Date"].min()
     max_d = plot_df["Date"].max()
 
@@ -204,7 +206,7 @@ st.plotly_chart(fig, use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ----------------------------
-# Simple “before/after” view for selected event (optional but very useful)
+# Before/after window
 # ----------------------------
 st.write("")
 st.subheader("Quick before/after check (optional)")
@@ -247,25 +249,22 @@ st.divider()
 with st.expander("ℹ️ How to interpret this page"):
     st.markdown("""
 ### What this page is doing
-This is a **time alignment tool**: it helps you visually inspect steel price movement around events that
-may matter for trade, energy, supply chains, or demand sentiment.
+This is a **time alignment tool**: it helps you inspect steel price movement around events that may matter for
+trade policy, energy risk, supply chains, or demand sentiment.
 
-It’s useful because it forces discipline:
+It supports disciplined questions like:
 - **What was the trend before the event?**
-- **Did volatility jump?**
-- **Did the level or slope shift in a sustained way?**
+- **Did volatility increase?**
+- **Did the level or slope change in a sustained way?**
 
 ### What it is *not* doing
 This does **not** prove that an event caused a price move.
-Steel prices are influenced by many overlapping drivers: capacity, demand cycles, inventories,
-freight, policy, and energy.
+Steel prices are influenced by overlapping drivers (capacity, demand cycles, inventories, freight, policy, energy).
 
-This page is meant to support discussion like:
-> “Around this event, the market moved into a different regime — here’s what changed and why it might matter.”
+The intent is discussion framing, not “proof”.
 
 ### Why this belongs in an industrial portfolio
 Industrial roles often require combining:
-- messy real-world data
 - imperfect proxies
 - domain framing
 - clear limits on interpretation
