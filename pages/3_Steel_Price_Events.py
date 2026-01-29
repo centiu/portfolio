@@ -1,7 +1,6 @@
 import sys
 from pathlib import Path
 
-# --- ensure repo root on path (so common_ui imports work) ---
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -12,7 +11,6 @@ import plotly.express as px
 
 from common_ui import inject_css, style_plotly
 
-# yfinance dependency
 try:
     import yfinance as yf
 except ModuleNotFoundError:
@@ -24,64 +22,59 @@ st.set_page_config(page_title="Steel price vs events", layout="wide")
 THEME = st.session_state.get("theme", "light")
 inject_css(THEME)
 
-# ----------------------------
-# Framing
-# ----------------------------
 st.title("🧭 Steel price trends vs major events")
-st.caption("Steel price proxy (CME HRC futures via Yahoo Finance) with an event timeline overlay.")
+st.caption("Steel price proxy (via Yahoo Finance) with an editable event timeline overlay.")
 
 st.markdown(
     """
 <div class="card">
   <div class="muted">
-    This page overlays <b>notable macro / policy / geopolitical events</b> on a steel price time series.
-    It is not meant to “prove” causality. The goal is to support calm, defensible discussion:
-    <ul>
-      <li>What was the trend before/after an event?</li>
-      <li>Did volatility increase? Did the trend break?</li>
-      <li>Which events align with structural changes vs short-lived noise?</li>
-    </ul>
+    This page overlays <b>macro / policy / geopolitical events</b> onto a steel price trend.
+    It is not designed to “prove” causality — the goal is to support calm, defensible discussion about
+    timing, regime shifts, and volatility changes.
   </div>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
-# ----------------------------
-# Controls
-# ----------------------------
 with st.sidebar:
     st.subheader("Settings")
-
-    steel_ticker = st.text_input(
-        "Steel price ticker (Yahoo Finance)",
-        value="HRC=F",
-        help="Default: HRC=F (CME HRC futures proxy on Yahoo Finance).",
-    )
-
+    steel_ticker = st.text_input("Steel price ticker (Yahoo Finance)", value="HRC=F")
     lookback = st.selectbox("Lookback", ["6mo", "1y", "2y", "5y", "10y", "max"], index=3)
     normalize = st.toggle("Normalize to 100", value=False)
     show_events = st.toggle("Show event markers", value=True)
     show_event_labels = st.toggle("Show event labels", value=True)
 
-# ----------------------------
-# Data loading
-# ----------------------------
 @st.cache_data(ttl=3600)
 def load_series(ticker: str, period: str) -> pd.DataFrame:
     df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
     if df is None or df.empty:
         return pd.DataFrame()
-    out = df[["Close"]].copy()
-    out = out.rename(columns={"Close": "Price"})
+
+    # Some tickers come back with odd columns; enforce a single numeric series
+    if "Close" in df.columns:
+        out = df[["Close"]].copy()
+        out.columns = ["Price"]
+    else:
+        # fallback: pick the last column that looks numeric
+        out = df.select_dtypes(include="number").copy()
+        if out.empty:
+            return pd.DataFrame()
+        out = out.iloc[:, [-1]].copy()
+        out.columns = ["Price"]
+
+    out = out.dropna()
+    out.index = pd.to_datetime(out.index, errors="coerce")
     out = out.dropna()
     out.index.name = "Date"
+
     return out
 
 series = load_series(steel_ticker, lookback)
 
 if series.empty:
-    st.error("No data returned for this ticker / lookback. Try a different lookback or ticker.")
+    st.error("No usable data returned. Try a different ticker or lookback.")
     st.stop()
 
 plot_series = series.copy()
@@ -89,7 +82,7 @@ if normalize:
     plot_series["Price"] = (plot_series["Price"] / plot_series["Price"].iloc[0]) * 100.0
 
 # ----------------------------
-# Default event set (IMPORTANT: Date is real date type)
+# Default events (Date must be date-like for data_editor)
 # ----------------------------
 default_events = pd.DataFrame(
     [
@@ -97,47 +90,31 @@ default_events = pd.DataFrame(
             "Date": pd.to_datetime("2018-03-08").date(),
             "Event": "US Section 232 steel tariffs announced (Trump)",
             "Category": "Policy / Tariffs",
-            "Why it matters": "Trade policy shock; changes import economics and market expectations.",
+            "Why it matters": "Trade policy shock; changes import economics and expectations.",
         },
         {
             "Date": pd.to_datetime("2021-03-11").date(),
             "Event": "China 14th Five-Year Plan endorsed (2021–2025)",
             "Category": "China / Policy",
-            "Why it matters": "Signals priorities around industry, energy, and long-run growth structure.",
+            "Why it matters": "Signals priorities around industry, energy, and long-run structure.",
         },
         {
             "Date": pd.to_datetime("2024-04-13").date(),
-            "Event": "Iran launches direct attack on Israel (missiles/drones)",
+            "Event": "Iran direct attack on Israel (missiles/drones)",
             "Category": "Geopolitics",
-            "Why it matters": "Risk premium + energy/logistics uncertainty; global inflation sensitivity.",
-        },
-        {
-            "Date": pd.to_datetime("2025-06-13").date(),
-            "Event": "Israel strikes Iran; escalation risk concerns",
-            "Category": "Geopolitics",
-            "Why it matters": "Energy shock risk; sentiment and freight impacts.",
-        },
-        {
-            "Date": pd.to_datetime("2026-01-07").date(),
-            "Event": "Venezuela political disruption",
-            "Category": "Geopolitics",
-            "Why it matters": "Context signal (often more energy-related than direct steel driver).",
+            "Why it matters": "Energy and risk premium context; freight/logistics uncertainty.",
         },
     ]
 )
 
-# Persist editable events in session
 if "steel_events" not in st.session_state:
     st.session_state.steel_events = default_events
 
 st.write("")
 st.subheader("Event timeline (editable)")
 
-# Ensure schema stays consistent: Date column must be date-like for DateColumn
 events_df = st.session_state.steel_events.copy()
-if "Date" in events_df.columns:
-    # Convert anything in Date column to python date (safe for data_editor)
-    events_df["Date"] = pd.to_datetime(events_df["Date"], errors="coerce").dt.date
+events_df["Date"] = pd.to_datetime(events_df["Date"], errors="coerce").dt.date
 
 events = st.data_editor(
     events_df,
@@ -154,24 +131,34 @@ events = st.data_editor(
         "Why it matters": st.column_config.TextColumn("Why it matters", width="large"),
     },
 )
-
-# Save edited version back
 st.session_state.steel_events = events
 
-# Clean event dates for plotting
 events_clean = events.copy()
 events_clean["Date"] = pd.to_datetime(events_clean["Date"], errors="coerce")
 events_clean = events_clean.dropna(subset=["Date"]).sort_values("Date")
 
 # ----------------------------
-# Plot
+# Plot (robust)
 # ----------------------------
 st.write("")
 st.subheader("Steel price trend")
 
-plot_df = plot_series.reset_index()
+# Make index + columns explicit and Plotly-safe
+plot_series = plot_series.copy()
+plot_series.index = pd.to_datetime(plot_series.index, errors="coerce")
+plot_series = plot_series.dropna()
 
-y_title = "Index (Start=100)" if normalize else "Price (USD)"
+plot_df = plot_series.reset_index()
+plot_df = plot_df.rename(columns={plot_df.columns[0]: "Date"})
+plot_df["Date"] = pd.to_datetime(plot_df["Date"], errors="coerce")
+plot_df["Price"] = pd.to_numeric(plot_df["Price"], errors="coerce")
+plot_df = plot_df.dropna(subset=["Date", "Price"]).sort_values("Date")
+
+if plot_df.empty:
+    st.error("Price series became empty after cleaning. Try another ticker or lookback.")
+    st.stop()
+
+y_title = "Index (Start=100)" if normalize else "Price"
 title = f"Steel price proxy: {steel_ticker}"
 subtitle = f"Lookback: {lookback} | Markers: {'on' if show_events else 'off'}"
 
@@ -189,7 +176,6 @@ if show_events and not events_clean.empty:
         d = r["Date"]
         if d < min_d or d > max_d:
             continue
-
         label = r["Event"] if show_event_labels else ""
         fig.add_vline(
             x=d,
@@ -225,7 +211,7 @@ if not events_clean.empty:
     if window.empty:
         st.info("No price data in the selected window.")
     else:
-        wdf = window.reset_index()
+        wdf = window.reset_index().rename(columns={window.reset_index().columns[0]: "Date"})
         fig_w = px.line(wdf, x="Date", y="Price", title=f"Window around event: {selected_event}")
         fig_w.update_traces(hovertemplate="%{x|%Y-%m-%d}<br><b>%{y:.2f}</b><extra></extra>")
         fig_w = style_plotly(
@@ -240,34 +226,20 @@ if not events_clean.empty:
         st.plotly_chart(fig_w, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-# ----------------------------
-# Interpretation / caveats
-# ----------------------------
 st.write("")
 st.divider()
 
 with st.expander("ℹ️ How to interpret this page"):
     st.markdown("""
 ### What this page is doing
-This is a **time alignment tool**: it helps you inspect steel price movement around events that may matter for
-trade policy, energy risk, supply chains, or demand sentiment.
-
-It supports disciplined questions like:
-- **What was the trend before the event?**
-- **Did volatility increase?**
-- **Did the level or slope change in a sustained way?**
+This is a **time alignment tool**: it helps you inspect whether steel prices change *around* events that may matter
+for trade policy, energy risk, supply chains, or demand sentiment.
 
 ### What it is *not* doing
-This does **not** prove that an event caused a price move.
-Steel prices are influenced by overlapping drivers (capacity, demand cycles, inventories, freight, policy, energy).
+This does **not** prove causality. Steel prices reflect many overlapping drivers (demand cycles, capacity, inventories,
+freight, policy, and energy).
 
-The intent is discussion framing, not “proof”.
-
-### Why this belongs in an industrial portfolio
-Industrial roles often require combining:
-- imperfect proxies
-- domain framing
-- clear limits on interpretation
-
-That is exactly the skill this page demonstrates.
+### Why it’s meaningful
+Industrial roles often require combining imperfect proxies and real-world context, while being explicit about limits.
+That is the skill this page demonstrates.
 """)
